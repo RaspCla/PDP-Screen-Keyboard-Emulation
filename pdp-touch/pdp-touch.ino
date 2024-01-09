@@ -1,11 +1,27 @@
-// ==============================================================================================================
+// ===================================================================================================================================
 //
 // Keyboard Replacement (Touchscreen) for rebuild PDP - Programmer to program Philips/Simoco FM1100 Transceiver
 // Display is 240x400
 //
+// Last Build on Arduino IDE 2.2.1
+// 
+// -----------------------------------------------------------------------------------------------------------------------------------
+// Ideas for Improvements 
+// - may be usage of canvas for the touch screen could improve screen handling and separate Text from buttons (low priority) 
+//   more information: https://cdn-learn.adafruit.com/downloads/pdf/adafruit-gfx-graphics-library.pdf
+// -----------------------------------------------------------------------------------------------------------------------------------
 //
-//
-// --------------------------------------------------------------------------------------------------------------
+// Change History:
+// Who    When        What
+// ------+------------+---------------------------------------------------------------------------------------------------------------
+// Claus  2024-01-09  Resync if command is not known (1 nibble offset in receivebuffer), much more stable, now
+// Claus  2024-01-05  improvements 
+// Claus  2024-01-02  first stable version with display emulation
+// Claus  2023-12-21  first steps with display emulation
+// Claus  2023-12-14  Keyboard emululation is running via touch display
+// Claus  2023-11-12  first steps with Arduino Mega 2560 and Touch display (previously pdp-FM1000)
+// 
+// -----------------------------------------------------------------------------------------------------------------------------------
 // 
 // Some hint in regard to the Display emulation
 // - Display starts in 8 Bit Mode after Power On
@@ -25,7 +41,7 @@
 
 #include <Arduino.h>
 #include "PinDefinition.h"
-using namespace PinDefinition;
+using namespace PinDefinition;          // for fast Pin handling
 #include <Adafruit_GFX.h>
 #include <MCUFRIEND_kbv.h>
 MCUFRIEND_kbv tft;
@@ -35,8 +51,8 @@ MCUFRIEND_kbv tft;
 #define MAXPRESSURE 1000
 #define ORIENTATION 1                   //change screen rotation 0=Portrait, 1=Landscape
 
-const int msg_border_horiz = 8;        // Board of text box horizontal  
-const int msg_border_vert  = 21;        // Board of text box vertical
+const int msg_border_horiz = 8;         // horizontal Border of text box   
+const int msg_border_vert  = 21;        // vertical Border of text box 
 
 #define TextSize 4                      // 1..4; 
 #define PixelPerChar 24                 // TextSize = 4 -> 24Pixel width (cursor x-position = n*24)
@@ -51,8 +67,6 @@ byte DispMirror[] = {' ', ' ', ' ', ' ', ' ',' ', ' ', ' ', ' ', ' ',' ', ' ', '
 
 uint16_t ID ;
 int Shift = 0;
-// int Baud = 115200;                      // Baudrate auf maximum
-                     // Baudrate auf maximum
 
 
 // =========================================================================================================
@@ -108,7 +122,7 @@ byte Disp_OutPtr = 0;                     // Pointer for last Byte written to bu
 
 #define DD_RAM 0                          
 #define CG_RAM 1
-byte AktivD_RAM = DD_RAM;                    // Contains information which Display RAM is active
+byte AktivD_RAM = DD_RAM;                 // Contains information which Display RAM is active
 
 byte D_Adr = 0;                           // To send current Adress to 8031 (DD_RAM or CG_RAM)
 byte D_CgAdr = 0;                         // Current CG-RAM address
@@ -722,19 +736,18 @@ void loop(void)
 
 while (Disp_InPtr!=Disp_OutPtr)
 {
-// so klappts nicht, nach dem Verundenbleibt nur eine "1" übrig :-?    Serial.println(Disp_Buffer[Disp_OutPtr++]&&DisplMask, BIN); 
 
  Serial.println(Disp_Buffer[Disp_OutPtr], BIN); 
 
- if ( D_4B_1_2==1)                                        // current nibble = nibble1 = high nibble
- {
-  D_4B_1_2=2;                                             // Next nibble is nibble2 
-  D_Instruction=Disp_Buffer[Disp_OutPtr++]<<4;            // High Nibble + RW&RS Pins .. -> D_Instruction         
+ if ( D_4B_1_2==1)                                                      // current nibble = nibble 1 = high nibble
+ {                                                                      // ---------------------------------------
+  D_4B_1_2=2;                                                           // Next nibble is nibble 2 
+  D_Instruction=Disp_Buffer[Disp_OutPtr++]<<4;                          // High Nibble + RW&RS Pins .. -> D_Instruction         
  }
- else
- {
-  D_4B_1_2=1;                                             // Next nibble is nibble1 
-  D_Instruction|=(Disp_Buffer[Disp_OutPtr++]&DisplOutMsk);// Low nibble -> D_Instruction
+ else                                                                   // current nibble = nibble 2 = low nibble
+ {                                                                      // --------------------------------------
+  D_4B_1_2=1;                                                           // Next nibble is nibble 1 
+  D_Instruction|=(Disp_Buffer[Disp_OutPtr++]&DisplOutMsk);              // Low nibble -> D_Instruction
   Serial.print(D_Instruction, BIN); 
 
                                                                         // display command handler
@@ -794,21 +807,27 @@ while (Disp_InPtr!=Disp_OutPtr)
       {                                                               // ------------------
         Serial.print("   CG-RAM Adr.= "); 
         Serial.println(D_Instruction&0b00111111,HEX);
-        D_CgAdr = (D_Instruction&0b00111111);                         // Current CG-RAM address
-        D_Adr = D_CgAdr;
-        AktivD_RAM = CG_RAM;                                           
-       }
+         D_CgAdr = (D_Instruction&0b00111111);                         // Current CG-RAM address
+         D_Adr = D_CgAdr;
+         AktivD_RAM = CG_RAM;                                           
+      }
 
     else if ((D_Instruction&0b111110000000)==0b100010000000)          // Set DD-RAM address
       {                                                               // ------------------
         D_DdAdr = (D_Instruction&0b01111111);                         // Current CG-RAM address
         Serial.print("   DD-RAM Adr.= "); 
         Serial.println(D_DdAdr,HEX);
-        D_Adr = D_DdAdr;
-//        MirrorPtr = D_DdAdr;                                          // set pointer to display mirror, also
-        DisplayCursor();                                              // print character at cursor location inverse
         AktivD_RAM = DD_RAM;                                      
-
+        if ((D_Instruction&0b00111111)<= 15)                          // command only valid if address <= 15
+        {
+          D_Adr = D_DdAdr;
+//        MirrorPtr = D_DdAdr;                                        // set pointer to display mirror, also
+          DisplayCursor();                                            // print character at cursor location inverse
+        }
+        else
+        {
+         Serial.println("!!!!Error, DD-RAM Adr. > 0x0F !!!");
+        }
        }
 
 
@@ -816,6 +835,8 @@ while (Disp_InPtr!=Disp_OutPtr)
       {                                                               // ----------------------
         if (AktivD_RAM == DD_RAM)
         {
+         if (D_DdAdr <= 15)                                          // command only valid if address <= 15
+         {
           DispMirror[D_DdAdr]=(D_Instruction&0x0FF);                 // write character to display mirro
           tft.print((char)(DispMirror[D_DdAdr]));                    // send character to TFT and increment Pointer to mirror!
 
@@ -826,6 +847,11 @@ while (Disp_InPtr!=Disp_OutPtr)
 
           D_DdAdr++;
           D_Adr = D_DdAdr;
+         }
+        else
+         {
+         Serial.println("!!!!Error, DD-RAM Adr. > 0x0F !!!");
+         }
 
         }
         else
@@ -842,9 +868,12 @@ while (Disp_InPtr!=Disp_OutPtr)
       }
 
          
-    else
-      {
-        Serial.println("   display instruction not defined"); 
+    else                                                                        // In case of unknown command do not write but resync -> OutPtr with offset 1
+      {                                                                         // --------------------------------------------------------------------------
+        Serial.println("   !!!  display instruction not defined, Resync  !!!"); 
+        Disp_OutPtr--;                                                          // resync makes system much more stable !
+        D_4B_1_2=2;                                                             // Next nibble is nibble 2 
+        D_Instruction=Disp_Buffer[Disp_OutPtr++]<<4;                            // High Nibble + RW&RS Pins .. -> D_Instruction         
       }
   }
   
