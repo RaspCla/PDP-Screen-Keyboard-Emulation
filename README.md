@@ -1,4 +1,4 @@
-# PDP-Screen-Keyboard-Emulation
+# Screen- and Keyboard Emulation for Simoco/Philips PDP (FM1000-family programmer)
 
 If you have to rebuild / repair a PDP programmer, here is a nice solution with an Arduino Mega2560 and a Hzwdone Touchscreen 
 91,44mm (3,6''), resolution: 240*400, st7793 driver circuit. 
